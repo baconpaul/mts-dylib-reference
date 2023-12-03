@@ -3,41 +3,50 @@
 //
 
 #include <iostream>
+#include <cstring>
+#include <sys/shm.h>
 
-#define LOGDAT std::cout << __func__ << " " << __FILE__ << ":" << __LINE__ << " | ";
-#define LOGFN LOGDAT << std::endl
+#define LOGDAT std::cout << __func__ << " " << __FILE__ << ":" << __LINE__ << " | "
+#define LOGFN LOGDAT << std::endl;
 
 extern "C"
 {
+   key_t key = ftok("mtsesp", 65);
+   int shmid = shmget(key, sizeof(bool) + sizeof(int) + 128 * sizeof(double), 0666 | IPC_CREAT);
+   bool* hasMaster = (bool*)shmat(shmid, (void*)0, 0);
+   int* numClients = (int*) hasMaster + sizeof(bool);
+   double* tuning = (double*) numClients + sizeof(int);
+
    // Master-side API
-   static bool hasMaster{false};
+
    void MTS_RegisterMaster(void *) {
       LOGFN;
-      hasMaster = true;
+      *hasMaster = true;
+      *numClients = 0;
    }
    void MTS_DeregisterMaster() {
       LOGFN;
-      hasMaster = false;
+      *hasMaster = false;
+      *numClients = 0;
    }
    bool MTS_HasMaster() {
-      LOGDAT << hasMaster << std::endl;
-      return hasMaster;
+      LOGDAT << *hasMaster << std::endl;
+      return *hasMaster;
    }
-   // Don't implement IPC
    bool MTS_HasIPC() {
       LOGFN;
-      return false;
+      return true;
    }
    void MTS_Reinitialize() {
       LOGFN;
+      *hasMaster = false;
+      *numClients = 0;
    }
 
-   int numClients{0};
    int MTS_GetNumClients() {
-      return numClients;
+      return *numClients;
    }
 
-   double tuning[128];
    void MTS_SetNoteTunings(const double *d)
    {
       LOGFN;
@@ -47,7 +56,7 @@ extern "C"
 
    void MTS_SetNoteTuning(double f, char idx)
    {
-      LOGDAT << f << " " << idx << std::endl;
+      LOGDAT << f << " " << (int)idx << std::endl;
       tuning[idx] = f;
    }
 
@@ -70,11 +79,11 @@ extern "C"
    // Client implementation
    void MTS_RegisterClient() {
       LOGFN;
-      numClients++;
+      (*numClients)++;
    }
    void MTS_DeregisterClient() {
       LOGFN;
-      numClients --;
+      (*numClients)--;
    }
    // Don't implement note filtering
    bool MTS_ShouldFilterNote(char, char) { return false; }
