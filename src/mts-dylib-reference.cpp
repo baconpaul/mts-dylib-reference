@@ -3,17 +3,31 @@
 //
 
 #include <iostream>
+#include <cstring>
+#include <math.h>
 
-#define LOGDAT std::cout << __func__ << " " << __FILE__ << ":" << __LINE__ << " | ";
-#define LOGFN LOGDAT << std::endl
+#define LOGDAT std::cout << __func__ << " " << __FILE__ << ":" << __LINE__ << " | "
+#define LOGFN LOGDAT << std::endl;
+
+static bool tuningInitialized = false;
+static void setDefaultTuning(double *t)
+{
+   for (int i=0;i<128;i++) t[i]=440.*pow(2.,(i-69.)/12.);
+}
 
 extern "C"
 {
    // Master-side API
    static bool hasMaster{false};
+   double tuning[128];
    void MTS_RegisterMaster(void *) {
       LOGFN;
       hasMaster = true;
+      if (!tuningInitialized)
+      {
+         setDefaultTuning(tuning);
+         tuningInitialized = true;
+      }
    }
    void MTS_DeregisterMaster() {
       LOGFN;
@@ -28,16 +42,18 @@ extern "C"
       LOGFN;
       return false;
    }
+   int numClients{0};
    void MTS_Reinitialize() {
       LOGFN;
+      hasMaster = false;
+      numClients = 0;
+      setDefaultTuning(tuning);
    }
 
-   int numClients{0};
    int MTS_GetNumClients() {
       return numClients;
    }
 
-   double tuning[128];
    void MTS_SetNoteTunings(const double *d)
    {
       LOGFN;
