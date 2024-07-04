@@ -5,9 +5,16 @@
 #include <iostream>
 #include <cstring>
 #include <sys/shm.h>
+#include <math.h>
 
 #define LOGDAT std::cout << __func__ << " " << __FILE__ << ":" << __LINE__ << " | "
 #define LOGFN LOGDAT << std::endl;
+
+static bool tuningInitialized = false;
+static void setDefaultTuning(double *t)
+{
+   for (int i=0;i<128;i++) t[i]=440.*pow(2.,(i-69.)/12.);
+}
 
 extern "C"
 {
@@ -23,6 +30,11 @@ extern "C"
       LOGFN;
       *hasMaster = true;
       *numClients = 0;
+      if (!tuningInitialized)
+      {
+         setDefaultTuning(tuning);
+         tuningInitialized = true;
+      }
    }
    void MTS_DeregisterMaster() {
       LOGFN;
@@ -41,6 +53,7 @@ extern "C"
       LOGFN;
       *hasMaster = false;
       *numClients = 0;
+      setDefaultTuning(tuning);
    }
 
    int MTS_GetNumClients() {
