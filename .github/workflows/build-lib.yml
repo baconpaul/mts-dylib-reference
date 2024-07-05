@@ -58,10 +58,13 @@ jobs:
 
       - name: Run Tests
         run: |
+          set -e
+          
           export MTS_LIB_LOCATION=${GITHUB_WORKSPACE}${{ matrix.dylibvar }}
           echo $MTS_LIB_LOCATION
 
           ./build/${{ matrix.testexe }}
+          MTS_REFERENCE_DEACTIVATE_IPC=1 ./build/${{ matrix.testexe }}
           
           ./build/${{ matrix.testexe }} --null
           ./build/${{ matrix.testexe }} --clientTest

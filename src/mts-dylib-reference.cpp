@@ -60,19 +60,21 @@ int32_t *numClients{nullptr};
 double *tuning{nullptr};
 uint16_t *noteFilter{nullptr}; // channel bitset per key
 
-std::array<uint8_t, memSize> memory{};
+uint8_t memory[memSize];
 
 bool skipIPC() { return getenv("MTS_REFERENCE_DEACTIVATE_IPC"); }
 
 bool connectToMemory()
 {
     bool initValues{false};
+
+    uint8_t *memSeg{nullptr};
 #if IPC_SUPPORT
 
     if (skipIPC())
     {
         LOGDAT << "IPC-enabled platform chooses to skip IPC support" << std::endl;
-        hasMaster = (bool *)(memory.data());
+        memSeg = (uint8_t *)(&(memory[0]));
     }
     else
     {
@@ -113,17 +115,26 @@ bool connectToMemory()
             }
         }
 
-        hasMaster = (bool *)shmat(shmid, (void *)0, 0);
+        memSeg = (uint8_t *)shmat(shmid, (void *)0, 0);
         thisProcessAttachments = 1;
     }
 #else
-    hasMaster = (bool *)(memory.data());
+    memSeg = (uint8_t *)(&(memory[0]));
 #endif
 
-    tuningInitialized = (bool *)hasMaster + sizeof(bool);
-    numClients = (int32_t *)tuningInitialized + sizeof(bool);
-    tuning = (double *)numClients + sizeof(int32_t);
-    noteFilter = (uint16_t *)tuning + 128 * sizeof(double);
+    hasMaster = (bool*)memSeg;
+    memSeg += sizeof(bool);
+
+    tuningInitialized = (bool *)memSeg;
+    memSeg += sizeof(bool);
+
+    numClients = (int32_t *)memSeg;
+    memSeg += sizeof(int32_t);
+
+    tuning = (double *)memSeg;
+    memSeg += 128 * sizeof(double);
+
+    noteFilter = (uint16_t *)memSeg;
 
     if (initValues)
     {
