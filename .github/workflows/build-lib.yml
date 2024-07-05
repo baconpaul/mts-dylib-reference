@@ -62,4 +62,5 @@ jobs:
           echo $MTS_LIB_LOCATION
 
           ./build/${{ matrix.testexe }}
+          MTS_REFERENCE_DEACTIVATE_IPC=1 ./build/${{ matrix.testexe }}
 
