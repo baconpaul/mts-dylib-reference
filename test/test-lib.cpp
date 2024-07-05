@@ -1,8 +1,9 @@
-//
-// Created by Paul Walker on 7/5/24.
-//
+/*
+ * A basic set of smoke tests so I can make sure it at least starts and stuff
+ */
 
 #include <iostream>
+#include <string.h>
 #include "libMTSMaster.h"
 #include "libMTSClient.h"
 
