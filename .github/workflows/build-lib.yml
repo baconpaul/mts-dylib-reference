@@ -1,4 +1,4 @@
-name: Build DAW Plugin
+name: Build MTS Reference Lib
 on:
   push:
     branches:
