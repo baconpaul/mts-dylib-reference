@@ -111,6 +111,12 @@ int clientMasterTest()
     return 0;
 }
 
+int invalidCallSequence()
+{
+    MTS_GetNumClients();
+    return 0;
+}
+
 int masterTwice()
 {
     MTS_RegisterMaster();
@@ -147,6 +153,8 @@ int main(int argc, char **argv)
     RUN(clientTest);
     RUN(masterTest);
     RUN(masterTwice);
+
+    RUN(invalidCallSequence);
 
     exit(2);
 }

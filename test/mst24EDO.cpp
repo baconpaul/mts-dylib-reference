@@ -13,6 +13,8 @@ int main(int argc, char **argv)
 {
     MTS_RegisterMaster();
 
+    MTS_SetScaleName("24EDO");
+
     for (int i = 0; i < 128; ++i)
     {
         MTS_SetNoteTuning(440.0 * std::pow(2.0, (i - 69) / 24), i);
