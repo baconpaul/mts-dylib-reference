@@ -12,6 +12,7 @@
 #include <cmath>
 #include <array>
 #include <string>
+#include <cassert>
 
 #define LOGDAT                                                                                     \
     std::cout << "src/mts-dylib-reference.cpp"                                                     \
@@ -42,52 +43,62 @@ bool *tuningInitialized{nullptr};
 int32_t *numClients{nullptr};
 double *tuning{nullptr};
 
-#if !IPC_SUPPORT
 std::array<uint8_t, memSize> memory{};
-#endif
+
+bool skipIPC() { return getenv("MTS_REFERENCE_DEACTIVATE_IPC"); }
 
 bool connectToMemory()
 {
     bool initValues{false};
 #if IPC_SUPPORT
-    if (hasMaster && tuningInitialized && numClients &&
-        tuning) // already connected in this process!
+
+    if (skipIPC())
     {
-        thisProcessAttachments++;
-        LOGDAT << "Already set up - no need to reconnect. Process attachment number " << thisProcessAttachments << std::endl;
-        return true;
+        LOGDAT << "IPC-enabled platform chooses to skip IPC support" << std::endl;
+        hasMaster = (bool *)(memory.data());
     }
-
-    // We need a shared existing path so
-    Dl_info dl_info;
-    auto res = dladdr((void *)connectToMemory, &dl_info);
-    LOGDAT << "DLL Path is " << dl_info.dli_fname << std::endl;
-
-    key_t key = ftok(dl_info.dli_fname, 63);
-    if (key < 0)
+    else
     {
-        LOGERR;
-        LOGDAT << "Unable to create mtsesp / 65 key" << std::endl;
-    }
+        if (hasMaster && tuningInitialized && numClients &&
+            tuning) // already connected in this process!
+        {
+            thisProcessAttachments++;
+            LOGDAT << "Already set up - no need to reconnect. Process attachment number "
+                   << thisProcessAttachments << std::endl;
+            return true;
+        }
 
-    // Step one: See if they memory exists without creating it
-    LOGDAT << "shmem Key is " << key << std::endl;
-    shmid = shmget(key, memSize, 0666);
-    if (shmid < 0)
-    {
-        LOGDAT << "Creating and initializing shared memory segment" << std::endl;
-        shmid = shmget(key, memSize, 0666 | IPC_CREAT);
-        initValues = true;
-        if (shmid < 0)
+        // We need a shared existing path so
+        Dl_info dl_info;
+        auto res = dladdr((void *)connectToMemory, &dl_info);
+        LOGDAT << "DLL Path is " << dl_info.dli_fname << std::endl;
+
+        key_t key = ftok(dl_info.dli_fname, 63);
+        if (key < 0)
         {
             LOGERR;
-            LOGDAT << "Unable to create shared memory segment" << std::endl;
-            return false;
+            LOGDAT << "Unable to create mtsesp / 65 key" << std::endl;
         }
-    }
 
-    hasMaster = (bool *)shmat(shmid, (void *)0, 0);
-    thisProcessAttachments = 1;
+        // Step one: See if they memory exists without creating it
+        LOGDAT << "shmem Key is " << key << std::endl;
+        shmid = shmget(key, memSize, 0666);
+        if (shmid < 0)
+        {
+            LOGDAT << "Creating and initializing shared memory segment" << std::endl;
+            shmid = shmget(key, memSize, 0666 | IPC_CREAT);
+            initValues = true;
+            if (shmid < 0)
+            {
+                LOGERR;
+                LOGDAT << "Unable to create shared memory segment" << std::endl;
+                return false;
+            }
+        }
+
+        hasMaster = (bool *)shmat(shmid, (void *)0, 0);
+        thisProcessAttachments = 1;
+    }
 #else
     hasMaster = (bool *)(memory.data());
 #endif
@@ -117,6 +128,15 @@ bool connectToMemory()
 void checkForMemoryRelease()
 {
 #if IPC_SUPPORT
+    if (skipIPC())
+        return;
+
+    if (!hasMaster)
+    {
+        LOGDAT << "No need to release when hasMaster not bound to shmem";
+        return;
+    }
+
     bool freeSegment{false};
     if (hasMaster && !*hasMaster && numClients && !*numClients)
     {
@@ -128,6 +148,7 @@ void checkForMemoryRelease()
     {
         LOGDAT << "Detatching hasMaster from shmem" << std::endl;
         shmdt(hasMaster);
+        hasMaster = nullptr;
     }
     else
     {
@@ -135,8 +156,13 @@ void checkForMemoryRelease()
                << " attachments in this process" << std::endl;
     }
 
-    if (freeSegment)
+    if (freeSegment || thisProcessAttachments == 0)
     {
+        if (hasMaster)
+        {
+            shmdt(hasMaster);
+            hasMaster = nullptr;
+        }
         LOGDAT << "Releasing unused memory segment at " << shmid << std::endl;
         shmctl(shmid, IPC_RMID, nullptr);
     }
@@ -171,7 +197,7 @@ extern "C"
     {
         LOGFN;
 #if IPC_SUPPORT
-        return true;
+        return !skipIPC();
 #else
         return false;
 #endif
@@ -235,7 +261,25 @@ extern "C"
     bool MTS_ShouldFilterNote(char, char) { return false; }
     bool MTS_ShouldFilterNoteMultiChannel(char, char) { return false; }
 
-    const double *MTS_GetTuningTable() { return &tuning[0]; }
+    const double *MTS_GetTuningTable()
+    {
+        LOGFN;
+
+        /* So why do we have to do this? Well the GetTuningTable happens before any client
+         * is registered at all (!!) in the libMTSClient mtsclientglobal constructor. Ugh.
+         * But that also means we need to release properly. In the event that a master or
+         * client ever attached and detached this won't do anything.
+         */
+        struct ReleaseThingy
+        {
+            ~ReleaseThingy() { checkForMemoryRelease(); }
+        };
+        static ReleaseThingy rt;
+
+        connectToMemory();
+
+        return &tuning[0];
+    }
     const double *MTS_GetMultiChannelTuningTable(char) { return &tuning[0]; }
     bool MTS_UseMultiChannelTuning(char) { return false; }
     const char *MTS_GetScaleName() { return scaleName; }
