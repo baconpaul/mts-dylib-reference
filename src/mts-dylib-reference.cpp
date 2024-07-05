@@ -371,8 +371,8 @@ extern "C"
     MTSREF_EXPORT void MTS_DeregisterClient()
     {
         (*numClients)--;
-        checkForMemoryRelease();
         LOGDAT << "Client count is " << (*numClients) << std::endl;
+        checkForMemoryRelease();
     }
 
     MTSREF_EXPORT bool MTS_ShouldFilterNote(char note, char chan)
