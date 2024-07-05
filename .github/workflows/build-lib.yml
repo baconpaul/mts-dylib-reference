@@ -69,5 +69,6 @@ jobs:
           ./build/${{ matrix.testexe }} --null
           ./build/${{ matrix.testexe }} --clientTest
           ./build/${{ matrix.testexe }} --masterTest
+          ./build/${{ matrix.testexe }} --masterTwice
           # MTS_REFERENCE_DEACTIVATE_IPC=1 ./build/${{ matrix.testexe }}
 

@@ -15,7 +15,6 @@
 #include <cassert>
 #include <mutex>
 
-
 #if !defined(MTSREF_EXPORT)
 #if defined _WIN32 || defined __CYGWIN__
 #ifdef __GNUC__
@@ -45,7 +44,6 @@
 
 #define LOGERR LOGDAT << " ERROR: " << strerror(errno) << std::endl;
 int shmid{0};
-int thisProcessAttachments{0};
 #endif
 
 static void setDefaultTuning(double *t)
@@ -87,9 +85,6 @@ bool connectToMemory()
         if (hasMaster && tuningInitialized && numClients &&
             tuning[0]) // already connected in this process!
         {
-            thisProcessAttachments++;
-            LOGDAT << "Already set up - no need to reconnect. Process attachment number "
-                   << thisProcessAttachments << std::endl;
             return true;
         }
 
@@ -122,13 +117,12 @@ bool connectToMemory()
         }
 
         memSeg = (uint8_t *)shmat(shmid, (void *)0, 0);
-        thisProcessAttachments = 1;
     }
 #else
     memSeg = (uint8_t *)(&(memory[0]));
 #endif
 
-    hasMaster = (bool*)memSeg;
+    hasMaster = (bool *)memSeg;
     memSeg += sizeof(bool);
 
     tuningInitialized = (bool *)memSeg;
@@ -137,7 +131,7 @@ bool connectToMemory()
     numClients = (int32_t *)memSeg;
     memSeg += sizeof(int32_t);
 
-    for (int i=0; i<16; ++i)
+    for (int i = 0; i < 16; ++i)
     {
         tuning[i] = (double *)memSeg;
         memSeg += 128 * sizeof(double);
@@ -156,9 +150,9 @@ bool connectToMemory()
     if (!*tuningInitialized)
     {
         LOGDAT << "Initializing tuning table to 12-tet unfiltered" << std::endl;
-        for (int i=0; i<16; ++i)
+        for (int i = 0; i < 16; ++i)
             setDefaultTuning(tuning[i]);
-        for (int i=0; i<128; ++i)
+        for (int i = 0; i < 128; ++i)
             noteFilter[i] = 0;
         *tuningInitialized = true;
     }
@@ -186,21 +180,9 @@ void checkForMemoryRelease()
         freeSegment = true;
     }
 
-    thisProcessAttachments--;
-    if (thisProcessAttachments == 0)
+    if (freeSegment)
     {
-        LOGDAT << "Detatching hasMaster from shmem" << std::endl;
-        shmdt(hasMaster);
-        hasMaster = nullptr;
-    }
-    else
-    {
-        LOGDAT << "Remaining attached since there are still " << thisProcessAttachments
-               << " attachments in this process" << std::endl;
-    }
-
-    if (freeSegment || thisProcessAttachments == 0)
-    {
+        LOGDAT << "Releasing memory because no clients and no master" << std::endl;
         if (hasMaster)
         {
             shmdt(hasMaster);
@@ -211,6 +193,43 @@ void checkForMemoryRelease()
     }
 #endif
 }
+
+struct DisconnectOnExitGuard
+{
+    ~DisconnectOnExitGuard()
+    {
+        std::lock_guard<std::mutex> cl(s_connectMutex);
+
+#if IPC_SUPPORT
+        if (skipIPC())
+            return;
+
+        if (!hasMaster)
+            return;
+
+        /* the difference between this and the check above is the check
+         * will *also* not detach if it needs to free and this always
+         * detaches since it is an exit guard.
+         */
+
+        bool freeSegment{false};
+        if (hasMaster && !*hasMaster && numClients && !*numClients)
+        {
+            freeSegment = true;
+        }
+        LOGDAT << "Detatching shmem on exit" << std::endl;
+
+        shmdt(hasMaster);
+        hasMaster = nullptr;
+
+        if (freeSegment)
+        {
+            LOGDAT << "Deleting shared memory segment with no clients and master" << std::endl;
+            shmctl(shmid, IPC_RMID, nullptr);
+        }
+#endif
+    }
+};
 
 extern "C"
 {
@@ -251,11 +270,15 @@ extern "C"
     MTSREF_EXPORT void MTS_Reinitialize()
     {
         LOGFN;
+        static DisconnectOnExitGuard dg;
+
+        connectToMemory();
+
         *hasMaster = false;
         *numClients = 0;
-        for (int i=0; i<16; ++i)
+        for (int i = 0; i < 16; ++i)
             setDefaultTuning(tuning[0]);
-        for (int i=0; i<128; ++i)
+        for (int i = 0; i < 128; ++i)
             noteFilter[i] = 0;
 
         *tuningInitialized = true;
@@ -266,14 +289,14 @@ extern "C"
     MTSREF_EXPORT void MTS_SetNoteTunings(const double *d)
     {
         LOGFN;
-        for (int ch=0; ch<16; ++ch)
+        for (int ch = 0; ch < 16; ++ch)
             for (int i = 0; i < 128; ++i)
                 tuning[ch][i] = d[i];
     }
 
     MTSREF_EXPORT void MTS_SetNoteTuning(double f, char idx)
     {
-        for (int ch=0; ch<16; ++ch)
+        for (int ch = 0; ch < 16; ++ch)
             tuning[ch][idx] = f;
     }
 
@@ -285,7 +308,8 @@ extern "C"
     }
 
     // Don't implement note filtering or channel specific tuning yet
-    MTSREF_EXPORT void MTS_FilterNote(bool doF, char note, char chan) {
+    MTSREF_EXPORT void MTS_FilterNote(bool doF, char note, char chan)
+    {
         uint16_t mask = 0xFFFF;
 
         if (chan >= 0 && chan <= 15)
@@ -302,52 +326,57 @@ extern "C"
             noteFilter[note] = noteFilter[note] & ~mask;
         }
     }
-    MTSREF_EXPORT void MTS_ClearNoteFilter() {
-        for (int i=0; i<128; ++i)
+    MTSREF_EXPORT void MTS_ClearNoteFilter()
+    {
+        for (int i = 0; i < 128; ++i)
         {
             noteFilter[i] = 0;
         }
     }
-    MTSREF_EXPORT void MTS_FilterNoteMultiChannel(bool doF, char note, char chan) {
+    MTSREF_EXPORT void MTS_FilterNoteMultiChannel(bool doF, char note, char chan)
+    {
         if (chan >= 0 && chan < 15)
         {
             MTS_FilterNote(doF, note, chan);
         }
     }
-    MTSREF_EXPORT void MTS_ClearNoteFilterMultiChannel(char chan) {
-        uint16_t off = 1<<chan;
-        for (int i=0; i<128; ++i)
+    MTSREF_EXPORT void MTS_ClearNoteFilterMultiChannel(char chan)
+    {
+        uint16_t off = 1 << chan;
+        for (int i = 0; i < 128; ++i)
         {
             noteFilter[i] = noteFilter[i] & ~off;
         }
     }
 
     MTSREF_EXPORT void MTS_SetMultiChannel(bool, char) {}
-    MTSREF_EXPORT void MTS_SetMultiChannelNoteTunings(const double *d, char ch) {
+    MTSREF_EXPORT void MTS_SetMultiChannelNoteTunings(const double *d, char ch)
+    {
         for (int i = 0; i < 128; ++i)
             tuning[ch][i] = d[i];
     }
-    MTSREF_EXPORT void MTS_SetMultiChannelNoteTuning(double freq, char note, char ch) {
-        LOGDAT << "f=" << freq << " at " << (int) note << " " << (int) ch << std::endl;
+    MTSREF_EXPORT void MTS_SetMultiChannelNoteTuning(double freq, char note, char ch)
+    {
+        LOGDAT << "f=" << freq << " at " << (int)note << " " << (int)ch << std::endl;
         tuning[ch][note] = freq;
     }
 
     // Client implementation
     MTSREF_EXPORT void MTS_RegisterClient()
     {
-        LOGFN;
         connectToMemory();
         (*numClients)++;
+        LOGDAT << "Client count is " << (*numClients) << std::endl;
     }
     MTSREF_EXPORT void MTS_DeregisterClient()
     {
-        LOGFN;
         (*numClients)--;
-
+        LOGDAT << "Client count is " << (*numClients) << std::endl;
         checkForMemoryRelease();
     }
 
-    MTSREF_EXPORT bool MTS_ShouldFilterNote(char note, char chan) {
+    MTSREF_EXPORT bool MTS_ShouldFilterNote(char note, char chan)
+    {
         uint16_t mask = 0xFFFF;
         if (chan >= 0 && chan <= 15)
             mask = 1 << chan;
@@ -355,7 +384,8 @@ extern "C"
         return noteFilter[note] & mask;
     }
 
-    MTSREF_EXPORT bool MTS_ShouldFilterNoteMultiChannel(char note, char chan) {
+    MTSREF_EXPORT bool MTS_ShouldFilterNoteMultiChannel(char note, char chan)
+    {
         uint16_t mask = 0xFFFF;
         if (chan >= 0 && chan <= 15)
             mask = 1 << chan;
@@ -365,32 +395,14 @@ extern "C"
 
     MTSREF_EXPORT const double *MTS_GetTuningTable()
     {
-        LOGFN;
-
-        /* So why do we have to do this? Well the GetTuningTable happens before any client
-         * is registered at all (!!) in the libMTSClient mtsclientglobal constructor. Ugh.
-         * But that also means we need to release properly. In the event that a master or
-         * client ever attached and detached this won't do anything.
-         */
-        struct ReleaseThingy
-        {
-            ~ReleaseThingy() { checkForMemoryRelease(); }
-        };
-        static ReleaseThingy rt;
-
+        static DisconnectOnExitGuard rt;
         connectToMemory();
 
         return &tuning[0][0];
     }
-    MTSREF_EXPORT const double *MTS_GetMultiChannelTuningTable(char ch) {
-        LOGFN;
-
-        struct ReleaseThingy
-        {
-            ~ReleaseThingy() { checkForMemoryRelease(); }
-        };
-        static ReleaseThingy rt;
-
+    MTSREF_EXPORT const double *MTS_GetMultiChannelTuningTable(char ch)
+    {
+        static DisconnectOnExitGuard rt;
         connectToMemory();
 
         return &tuning[ch][0];

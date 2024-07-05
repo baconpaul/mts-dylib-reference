@@ -38,9 +38,9 @@ int clientMasterTest()
         return 1;
     }
 
-    for (int i=0; i<128; ++i)
+    for (int i = 0; i < 128; ++i)
     {
-        for (auto ch=-1; ch<16; ++ch)
+        for (auto ch = -1; ch < 16; ++ch)
         {
             if (MTS_ShouldFilterNote(cl, i, ch))
             {
@@ -64,9 +64,9 @@ int clientMasterTest()
     }
 
     LOGDAT << "Checking filter" << std::endl;
-    for (int i=0; i<128; ++i)
+    for (int i = 0; i < 128; ++i)
     {
-        for (auto ch=-1; ch<16; ++ch)
+        for (auto ch = -1; ch < 16; ++ch)
         {
             auto expected = (i == 60);
             if (MTS_ShouldFilterNote(cl2, i, ch) != expected)
@@ -84,7 +84,7 @@ int clientMasterTest()
     MTS_FilterNote(true, 60, -1);
 
     auto cl3 = MTS_RegisterClient();
-    for (int ch=0; ch<16; ++ch)
+    for (int ch = 0; ch < 16; ++ch)
     {
         freq = MTS_NoteToFrequency(cl3, 69, ch);
         LOGDAT << "Client 3: Note 69 Ch " << ch << " has frequency " << freq << std::endl;
@@ -106,6 +106,18 @@ int clientMasterTest()
         MTS_DeregisterClient(clients[i]);
     }
 
+    MTS_DeregisterMaster();
+
+    return 0;
+}
+
+int masterTwice()
+{
+    MTS_RegisterMaster();
+    MTS_DeregisterMaster();
+    MTS_Reinitialize();
+
+    MTS_RegisterMaster();
     MTS_DeregisterMaster();
 
     return 0;
@@ -134,6 +146,7 @@ int main(int argc, char **argv)
 
     RUN(clientTest);
     RUN(masterTest);
+    RUN(masterTwice);
 
     exit(2);
 }
