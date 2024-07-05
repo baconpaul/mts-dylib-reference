@@ -45,31 +45,64 @@ struct mtsmasterglobal
 #ifdef MTS_ESP_WIN
 	void load_lib()
     {
-        SHGetKnownFolderPathFunc SHGetKnownFolderPath=0;
-        CoTaskMemFreeFunc CoTaskMemFree=0;
-        HMODULE shell32Module=GetModuleHandleW(L"Shell32.dll");
-        HMODULE ole32Module=GetModuleHandleW(L"Ole32.dll");
-        if (shell32Module) SHGetKnownFolderPath=(SHGetKnownFolderPathFunc)GetProcAddress(shell32Module,"SHGetKnownFolderPath");
-        if (ole32Module) CoTaskMemFree=(CoTaskMemFreeFunc)GetProcAddress(ole32Module,"CoTaskMemFree");
-        if (SHGetKnownFolderPath && CoTaskMemFree)
-        {
-            const GUID FOLDERID_ProgramFilesCommonGUID={0xF7F1ED05,0x9F6D,0x47A2,0xAA,0xAE,0x29,0xD3,0x17,0xC6,0xF0,0x66};
-            PWSTR cf=NULL;
-            if (SHGetKnownFolderPath(&FOLDERID_ProgramFilesCommonGUID,0,0,&cf)>=0)
+        if (getenv("MTS_LIB_LOCATION")) {
+            std::cout << "Master Overriding MTS Location with [" << getenv("MTS_LIB_LOCATION") << "]" << std::endl;
+            handle = LoadLibraryA(getenv("MTS_LIB_LOCATION"));
+            std::cout << "Handle is " << handle << std::endl;
+
+            if (!handle)
             {
-                WCHAR buffer[MAX_PATH];buffer[0]=L'\0';
-                if (cf) wcsncpy(buffer,cf,MAX_PATH);
-                CoTaskMemFree(cf);
-                buffer[MAX_PATH-1]=L'\0';
-                const WCHAR *libpath=L"\\MTS-ESP\\LIBMTS.dll";
-                DWORD cfLen=wcslen(buffer);
-                wcsncat(buffer,libpath,MAX_PATH-cfLen-1);
-                if (!(handle=LoadLibraryW(buffer))) return;
+                DWORD errorMessageID = ::GetLastError();
+
+                LPSTR errorMessage = NULL;
+                size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                             NULL, errorMessageID, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPSTR)&errorMessage, 0, NULL);
+
+                std::cout << "Error Message: " << errorMessage << std::endl;
             }
-            else {CoTaskMemFree(cf);return;}
         }
-        else return;
+
+        if (!handle)
+        {
+            SHGetKnownFolderPathFunc SHGetKnownFolderPath = 0;
+            CoTaskMemFreeFunc CoTaskMemFree = 0;
+            HMODULE shell32Module = GetModuleHandleW(L"Shell32.dll");
+            HMODULE ole32Module = GetModuleHandleW(L"Ole32.dll");
+            if (shell32Module)
+                SHGetKnownFolderPath =
+                    (SHGetKnownFolderPathFunc)GetProcAddress(shell32Module, "SHGetKnownFolderPath");
+            if (ole32Module)
+                CoTaskMemFree = (CoTaskMemFreeFunc)GetProcAddress(ole32Module, "CoTaskMemFree");
+            if (SHGetKnownFolderPath && CoTaskMemFree)
+            {
+                const GUID FOLDERID_ProgramFilesCommonGUID = {
+                    0xF7F1ED05, 0x9F6D, 0x47A2, 0xAA, 0xAE, 0x29, 0xD3, 0x17, 0xC6, 0xF0, 0x66};
+                PWSTR cf = NULL;
+                if (SHGetKnownFolderPath(&FOLDERID_ProgramFilesCommonGUID, 0, 0, &cf) >= 0)
+                {
+                    WCHAR buffer[MAX_PATH];
+                    buffer[0] = L'\0';
+                    if (cf)
+                        wcsncpy(buffer, cf, MAX_PATH);
+                    CoTaskMemFree(cf);
+                    buffer[MAX_PATH - 1] = L'\0';
+                    const WCHAR *libpath = L"\\MTS-ESP\\LIBMTS.dll";
+                    DWORD cfLen = wcslen(buffer);
+                    wcsncat(buffer, libpath, MAX_PATH - cfLen - 1);
+                    if (!(handle = LoadLibraryW(buffer)))
+                        return;
+                }
+                else
+                {
+                    CoTaskMemFree(cf);
+                    return;
+                }
+            }
+            else
+                return;
+        }
         RegisterMaster              =(mts_c)    GetProcAddress(handle,"MTS_RegisterMaster");
+        std::cout << "MASTER Loaded register master as " << RegisterMaster << " from " << handle << std::endl;
         DeregisterMaster            =(mts_void) GetProcAddress(handle,"MTS_DeregisterMaster");
         HasMaster                   =(mts_bool) GetProcAddress(handle,"MTS_HasMaster");
         HasIPC                      =(mts_bool) GetProcAddress(handle,"MTS_HasIPC");
