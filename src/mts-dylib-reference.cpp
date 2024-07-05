@@ -14,21 +14,20 @@
 #include <string>
 #include <cassert>
 
-
 #if !defined(MTSREF_EXPORT)
-#   if defined _WIN32 || defined __CYGWIN__
-#      ifdef __GNUC__
-#         define MTSREF_EXPORT __attribute__((dllexport))
-#      else
-#         define MTSREF_EXPORT __declspec(dllexport)
-#      endif
-#   else
-#      if __GNUC__ >= 4 || defined(__clang__)
-#         define MTSREF_EXPORT __attribute__((visibility("default")))
-#      else
-#         define MTSREF_EXPORT
-#      endif
-#   endif
+#if defined _WIN32 || defined __CYGWIN__
+#ifdef __GNUC__
+#define MTSREF_EXPORT __attribute__((dllexport))
+#else
+#define MTSREF_EXPORT __declspec(dllexport)
+#endif
+#else
+#if __GNUC__ >= 4 || defined(__clang__)
+#define MTSREF_EXPORT __attribute__((visibility("default")))
+#else
+#define MTSREF_EXPORT
+#endif
+#endif
 #endif
 
 #define LOGDAT                                                                                     \
@@ -190,14 +189,14 @@ extern "C"
 {
 
     // Master-side API
-    void MTSREF_EXPORT MTS_RegisterMaster(void *)
+    MTSREF_EXPORT void MTS_RegisterMaster(void *)
     {
         LOGFN;
         connectToMemory();
         *hasMaster = true;
         *numClients = 0;
     }
-    void MTSREF_EXPORT MTS_DeregisterMaster()
+    MTSREF_EXPORT void MTS_DeregisterMaster()
     {
         LOGFN;
         *hasMaster = false;
@@ -205,12 +204,12 @@ extern "C"
 
         checkForMemoryRelease();
     }
-    bool MTSREF_EXPORT MTS_HasMaster()
+    MTSREF_EXPORT bool MTS_HasMaster()
     {
         LOGDAT << *hasMaster << std::endl;
         return *hasMaster;
     }
-    bool MTSREF_EXPORT MTS_HasIPC()
+    MTSREF_EXPORT bool MTS_HasIPC()
     {
         LOGFN;
 #if IPC_SUPPORT
@@ -220,7 +219,7 @@ extern "C"
 #endif
     }
 
-    void MTSREF_EXPORT MTS_Reinitialize()
+    MTSREF_EXPORT void MTS_Reinitialize()
     {
         LOGFN;
         *hasMaster = false;
@@ -229,45 +228,45 @@ extern "C"
         *tuningInitialized = true;
     }
 
-    int MTSREF_EXPORT MTS_GetNumClients() { return *numClients; }
+    MTSREF_EXPORT int MTS_GetNumClients() { return *numClients; }
 
-    void MTSREF_EXPORT MTS_SetNoteTunings(const double *d)
+    MTSREF_EXPORT void MTS_SetNoteTunings(const double *d)
     {
         LOGFN;
         for (int i = 0; i < 128; ++i)
             tuning[i] = d[i];
     }
 
-    void MTSREF_EXPORT MTS_SetNoteTuning(double f, char idx)
+    MTSREF_EXPORT void MTS_SetNoteTuning(double f, char idx)
     {
         LOGDAT << f << " " << (int)idx << std::endl;
         tuning[idx] = f;
     }
 
     char scaleName[256]{0};
-    void MTSREF_EXPORT MTS_SetScaleName(const char *s)
+    MTSREF_EXPORT void MTS_SetScaleName(const char *s)
     {
         LOGDAT << s << std::endl;
         strncpy(scaleName, s, 255);
     }
 
     // Don't implement note filtering or channel specific tuning yet
-    void MTSREF_EXPORT MTS_FilterNote(bool, char, char) {}
-    void MTSREF_EXPORT MTS_ClearNoteFilter() {}
-    void MTSREF_EXPORT MTS_SetMultiChannel(bool, char) {}
-    void MTSREF_EXPORT MTS_SetMultiChannelNoteTunings(const double *, char) {}
-    void MTSREF_EXPORT MTS_SetMultiChannelNoteTuning(double, char, char) {}
-    void MTSREF_EXPORT MTS_FilterNoteMultiChannel(bool, char, char) {}
-    void MTSREF_EXPORT MTS_ClearNoteFilterMultiChannel(char) {}
+    MTSREF_EXPORT void MTS_FilterNote(bool, char, char) {}
+    MTSREF_EXPORT void MTS_ClearNoteFilter() {}
+    MTSREF_EXPORT void MTS_SetMultiChannel(bool, char) {}
+    MTSREF_EXPORT void MTS_SetMultiChannelNoteTunings(const double *, char) {}
+    MTSREF_EXPORT void MTS_SetMultiChannelNoteTuning(double, char, char) {}
+    MTSREF_EXPORT void MTS_FilterNoteMultiChannel(bool, char, char) {}
+    MTSREF_EXPORT void MTS_ClearNoteFilterMultiChannel(char) {}
 
     // Client implementation
-    void MTSREF_EXPORT MTS_RegisterClient()
+    MTSREF_EXPORT void MTS_RegisterClient()
     {
         LOGFN;
         connectToMemory();
         (*numClients)++;
     }
-    void MTSREF_EXPORT MTS_DeregisterClient()
+    MTSREF_EXPORT void MTS_DeregisterClient()
     {
         LOGFN;
         (*numClients)--;
@@ -275,10 +274,10 @@ extern "C"
         checkForMemoryRelease();
     }
     // Don't implement note filtering
-    bool MTSREF_EXPORT MTS_ShouldFilterNote(char, char) { return false; }
-    bool MTSREF_EXPORT MTS_ShouldFilterNoteMultiChannel(char, char) { return false; }
+    MTSREF_EXPORT bool MTS_ShouldFilterNote(char, char) { return false; }
+    MTSREF_EXPORT bool MTS_ShouldFilterNoteMultiChannel(char, char) { return false; }
 
-    const double * MTSREF_EXPORT MTS_GetTuningTable()
+    MTSREF_EXPORT const double *MTS_GetTuningTable()
     {
         LOGFN;
 
@@ -297,8 +296,7 @@ extern "C"
 
         return &tuning[0];
     }
-    const double *MTSREF_EXPORT MTSGetMultiChannelTuningTable(char) { return &tuning[0]; }
-    bool MTSREF_EXPORT MTS_UseMultiChannelTuning(char) { return false; }
-    const char *MTSREF_EXPORT MTSGetScaleName() { return scaleName; }
-
+    MTSREF_EXPORT const double *MTSGetMultiChannelTuningTable(char) { return &tuning[0]; }
+    MTSREF_EXPORT bool MTS_UseMultiChannelTuning(char) { return false; }
+    MTSREF_EXPORT const char *MTSGetScaleName() { return scaleName; }
 }
