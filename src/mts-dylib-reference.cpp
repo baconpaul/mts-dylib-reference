@@ -53,11 +53,12 @@ static void setDefaultTuning(double *t)
 }
 
 static constexpr size_t memSize{sizeof(bool) + sizeof(bool) + sizeof(int32_t) +
-                                128 * sizeof(double)};
+                                128 * sizeof(double) + 128 * sizeof(uint16_t)};
 bool *hasMaster{nullptr};
 bool *tuningInitialized{nullptr};
 int32_t *numClients{nullptr};
 double *tuning{nullptr};
+uint16_t *noteFilter{nullptr}; // channel bitset per key
 
 std::array<uint8_t, memSize> memory{};
 
@@ -122,6 +123,7 @@ bool connectToMemory()
     tuningInitialized = (bool *)hasMaster + sizeof(bool);
     numClients = (int32_t *)tuningInitialized + sizeof(bool);
     tuning = (double *)numClients + sizeof(int32_t);
+    noteFilter = (uint16_t *)tuning + 128 * sizeof(double);
 
     if (initValues)
     {
@@ -129,6 +131,8 @@ bool connectToMemory()
         *hasMaster = false;
         *tuningInitialized = false;
         *numClients = 0;
+        for (int i=0; i<128; ++i)
+            noteFilter[i] = 0;
     }
 
     if (!*tuningInitialized)
@@ -206,8 +210,10 @@ extern "C"
     }
     MTSREF_EXPORT bool MTS_HasMaster()
     {
-        LOGDAT << *hasMaster << std::endl;
-        return *hasMaster;
+        if (hasMaster)
+            return *hasMaster;
+        else
+            return false;
     }
     MTSREF_EXPORT bool MTS_HasIPC()
     {
@@ -239,7 +245,6 @@ extern "C"
 
     MTSREF_EXPORT void MTS_SetNoteTuning(double f, char idx)
     {
-        LOGDAT << f << " " << (int)idx << std::endl;
         tuning[idx] = f;
     }
 
@@ -251,13 +256,46 @@ extern "C"
     }
 
     // Don't implement note filtering or channel specific tuning yet
-    MTSREF_EXPORT void MTS_FilterNote(bool, char, char) {}
-    MTSREF_EXPORT void MTS_ClearNoteFilter() {}
+    MTSREF_EXPORT void MTS_FilterNote(bool doF, char note, char chan) {
+        uint16_t mask = 0xFFFF;
+
+        if (chan >= 0 && chan <= 15)
+        {
+            mask = 1 << chan;
+        }
+
+        if (doF)
+        {
+            noteFilter[note] = noteFilter[note] | mask;
+        }
+        else
+        {
+            noteFilter[note] = noteFilter[note] & ~mask;
+        }
+    }
+    MTSREF_EXPORT void MTS_ClearNoteFilter() {
+        for (int i=0; i<128; ++i)
+        {
+            noteFilter[i] = 0;
+        }
+    }
+    MTSREF_EXPORT void MTS_FilterNoteMultiChannel(bool doF, char note, char chan) {
+        if (chan >= 0 && chan < 15)
+        {
+            MTS_FilterNote(doF, note, chan);
+        }
+    }
+    MTSREF_EXPORT void MTS_ClearNoteFilterMultiChannel(char chan) {
+        uint16_t off = 1<<chan;
+        for (int i=0; i<128; ++i)
+        {
+            noteFilter[i] = noteFilter[i] & ~off;
+        }
+    }
+
     MTSREF_EXPORT void MTS_SetMultiChannel(bool, char) {}
     MTSREF_EXPORT void MTS_SetMultiChannelNoteTunings(const double *, char) {}
     MTSREF_EXPORT void MTS_SetMultiChannelNoteTuning(double, char, char) {}
-    MTSREF_EXPORT void MTS_FilterNoteMultiChannel(bool, char, char) {}
-    MTSREF_EXPORT void MTS_ClearNoteFilterMultiChannel(char) {}
 
     // Client implementation
     MTSREF_EXPORT void MTS_RegisterClient()
@@ -274,8 +312,13 @@ extern "C"
         checkForMemoryRelease();
     }
     // Don't implement note filtering
-    MTSREF_EXPORT bool MTS_ShouldFilterNote(char, char) { return false; }
-    MTSREF_EXPORT bool MTS_ShouldFilterNoteMultiChannel(char, char) { return false; }
+    MTSREF_EXPORT bool MTS_ShouldFilterNote(char note, char chan) {
+        uint16_t mask = 0xFFFF;
+        if (chan >= 0 && chan <= 15)
+            mask = 1 << chan;
+
+        return noteFilter[note] & mask;
+    }
 
     MTSREF_EXPORT const double *MTS_GetTuningTable()
     {
