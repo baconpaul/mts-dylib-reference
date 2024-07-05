@@ -131,14 +131,14 @@ bool connectToMemory()
         *hasMaster = false;
         *tuningInitialized = false;
         *numClients = 0;
-        for (int i=0; i<128; ++i)
-            noteFilter[i] = 0;
     }
 
     if (!*tuningInitialized)
     {
-        LOGDAT << "Initializing tuning table to 12-tet" << std::endl;
+        LOGDAT << "Initializing tuning table to 12-tet unfiltered" << std::endl;
         setDefaultTuning(tuning);
+        for (int i=0; i<128; ++i)
+            noteFilter[i] = 0;
         *tuningInitialized = true;
     }
 
@@ -231,6 +231,9 @@ extern "C"
         *hasMaster = false;
         *numClients = 0;
         setDefaultTuning(tuning);
+        for (int i=0; i<128; ++i)
+            noteFilter[i] = 0;
+
         *tuningInitialized = true;
     }
 
