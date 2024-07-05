@@ -36,7 +36,9 @@ uint8_t memory[memSize];
 bool connectToMemory()
 {
 #if IPC_SUPPORT
-   // TODO: This really needs some error checking
+   if (hasMaster && numClients && tuning) // already connected in this process!
+      return true;
+
    key_t key = ftok("mtsesp", 65);
    int shmid = shmget(key, memSize, 0666 | IPC_CREAT);
    if (shmid < 0)
