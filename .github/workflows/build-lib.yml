@@ -1,0 +1,43 @@
+name: Build DAW Plugin
+on:
+  push:
+    branches:
+      - main
+      - 'releases/**'
+    tags:
+      - 'v**'
+  pull_request:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build_plugin:
+    name: MTS Lib Build - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+          - os: macos-latest
+          - os: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode Version
+        if: runner.os == 'macOS'
+        run: sudo xcode-select -switch /Applications/Xcode_15.1.app
+
+      - name: Build 
+        run: |
+          cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Release
+          cmake --build ./build --config Release
+
+      - name: Show Build Directory
+        run: |
+          ls -l ./build
+
