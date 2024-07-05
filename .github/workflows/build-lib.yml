@@ -20,8 +20,18 @@ jobs:
       matrix:
         include:
           - os: windows-latest
+            dylib: Release/MTS.dll
+            dylibvar: \\build\\Release\\MTS.dll
+            testexe: test/Release/test-dylib.exe
           - os: macos-latest
+            dylib: libMTS.dylib
+            dylibvar: /build/libMTS.dylib
+            testexe: test/test-dylib
           - os: ubuntu-latest
+            dylib: libMTS.so
+            dylibvar: /build/libMTS.so
+            testexe: test/test-dylib
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -36,8 +46,21 @@ jobs:
         run: |
           cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Release
           cmake --build ./build --config Release
+          echo "----"
+          echo "Specific dylib"
+          cmake --build ./build --config Release --target test-dylib
 
-      - name: Show Build Directory
+      - name: Show Build Directory and dylib
         run: |
           ls -l ./build
+          
+          ls -l ./build/${{ matrix.dylib }}
+
+      - name: Run Tests
+        run: |
+          export MTS_LIB_LOCATION=${GITHUB_WORKSPACE}${{ matrix.dylibvar }}
+          echo $MTS_LIB_LOCATION
+
+          ./build/${{ matrix.testexe }}
+          # MTS_REFERENCE_DEACTIVATE_IPC=1 ./build/${{ matrix.testexe }}
 
