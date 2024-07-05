@@ -13,6 +13,7 @@
 #include <array>
 #include <string>
 #include <cassert>
+#include <thread>
 
 #if !defined(MTSREF_EXPORT)
 #if defined _WIN32 || defined __CYGWIN__
@@ -53,19 +54,23 @@ static void setDefaultTuning(double *t)
 }
 
 static constexpr size_t memSize{sizeof(bool) + sizeof(bool) + sizeof(int32_t) +
-                                128 * sizeof(double) + 128 * sizeof(uint16_t)};
+                                128 * 16 * sizeof(double) + 128 * sizeof(uint16_t)};
 bool *hasMaster{nullptr};
 bool *tuningInitialized{nullptr};
 int32_t *numClients{nullptr};
-double *tuning{nullptr};
+double *tuning[16]{};
 uint16_t *noteFilter{nullptr}; // channel bitset per key
 
 uint8_t memory[memSize];
 
 bool skipIPC() { return getenv("MTS_REFERENCE_DEACTIVATE_IPC"); }
 
+std::mutex s_connectMutex{};
+
 bool connectToMemory()
 {
+    std::lock_guard<std::mutex> cl(s_connectMutex);
+
     bool initValues{false};
 
     uint8_t *memSeg{nullptr};
@@ -79,7 +84,7 @@ bool connectToMemory()
     else
     {
         if (hasMaster && tuningInitialized && numClients &&
-            tuning) // already connected in this process!
+            tuning[0]) // already connected in this process!
         {
             thisProcessAttachments++;
             LOGDAT << "Already set up - no need to reconnect. Process attachment number "
@@ -131,8 +136,11 @@ bool connectToMemory()
     numClients = (int32_t *)memSeg;
     memSeg += sizeof(int32_t);
 
-    tuning = (double *)memSeg;
-    memSeg += 128 * sizeof(double);
+    for (int i=0; i<16; ++i)
+    {
+        tuning[i] = (double *)memSeg;
+        memSeg += 128 * sizeof(double);
+    }
 
     noteFilter = (uint16_t *)memSeg;
 
@@ -147,7 +155,8 @@ bool connectToMemory()
     if (!*tuningInitialized)
     {
         LOGDAT << "Initializing tuning table to 12-tet unfiltered" << std::endl;
-        setDefaultTuning(tuning);
+        for (int i=0; i<16; ++i)
+            setDefaultTuning(tuning[i]);
         for (int i=0; i<128; ++i)
             noteFilter[i] = 0;
         *tuningInitialized = true;
@@ -158,13 +167,15 @@ bool connectToMemory()
 
 void checkForMemoryRelease()
 {
+    std::lock_guard<std::mutex> cl(s_connectMutex);
+
 #if IPC_SUPPORT
     if (skipIPC())
         return;
 
     if (!hasMaster)
     {
-        LOGDAT << "No need to release when hasMaster not bound to shmem";
+        LOGDAT << "No need to release when hasMaster not bound to shmem" << std::endl;
         return;
     }
 
@@ -241,7 +252,8 @@ extern "C"
         LOGFN;
         *hasMaster = false;
         *numClients = 0;
-        setDefaultTuning(tuning);
+        for (int i=0; i<16; ++i)
+            setDefaultTuning(tuning[0]);
         for (int i=0; i<128; ++i)
             noteFilter[i] = 0;
 
@@ -253,13 +265,15 @@ extern "C"
     MTSREF_EXPORT void MTS_SetNoteTunings(const double *d)
     {
         LOGFN;
-        for (int i = 0; i < 128; ++i)
-            tuning[i] = d[i];
+        for (int ch=0; ch<16; ++ch)
+            for (int i = 0; i < 128; ++i)
+                tuning[ch][i] = d[i];
     }
 
     MTSREF_EXPORT void MTS_SetNoteTuning(double f, char idx)
     {
-        tuning[idx] = f;
+        for (int ch=0; ch<16; ++ch)
+            tuning[ch][idx] = f;
     }
 
     char scaleName[256]{0};
@@ -308,8 +322,14 @@ extern "C"
     }
 
     MTSREF_EXPORT void MTS_SetMultiChannel(bool, char) {}
-    MTSREF_EXPORT void MTS_SetMultiChannelNoteTunings(const double *, char) {}
-    MTSREF_EXPORT void MTS_SetMultiChannelNoteTuning(double, char, char) {}
+    MTSREF_EXPORT void MTS_SetMultiChannelNoteTunings(const double *d, char ch) {
+        for (int i = 0; i < 128; ++i)
+            tuning[ch][i] = d[i];
+    }
+    MTSREF_EXPORT void MTS_SetMultiChannelNoteTuning(double freq, char note, char ch) {
+        LOGDAT << "f=" << freq << " at " << (int) note << " " << (int) ch << std::endl;
+        tuning[ch][note] = freq;
+    }
 
     // Client implementation
     MTSREF_EXPORT void MTS_RegisterClient()
@@ -325,8 +345,16 @@ extern "C"
 
         checkForMemoryRelease();
     }
-    // Don't implement note filtering
+
     MTSREF_EXPORT bool MTS_ShouldFilterNote(char note, char chan) {
+        uint16_t mask = 0xFFFF;
+        if (chan >= 0 && chan <= 15)
+            mask = 1 << chan;
+
+        return noteFilter[note] & mask;
+    }
+
+    MTSREF_EXPORT bool MTS_ShouldFilterNoteMultiChannel(char note, char chan) {
         uint16_t mask = 0xFFFF;
         if (chan >= 0 && chan <= 15)
             mask = 1 << chan;
@@ -351,9 +379,21 @@ extern "C"
 
         connectToMemory();
 
-        return &tuning[0];
+        return &tuning[0][0];
     }
-    MTSREF_EXPORT const double *MTSGetMultiChannelTuningTable(char) { return &tuning[0]; }
-    MTSREF_EXPORT bool MTS_UseMultiChannelTuning(char) { return false; }
+    MTSREF_EXPORT const double *MTS_GetMultiChannelTuningTable(char ch) {
+        LOGFN;
+
+        struct ReleaseThingy
+        {
+            ~ReleaseThingy() { checkForMemoryRelease(); }
+        };
+        static ReleaseThingy rt;
+
+        connectToMemory();
+
+        return &tuning[ch][0];
+    }
+    MTSREF_EXPORT bool MTS_UseMultiChannelTuning(char) { return true; }
     MTSREF_EXPORT const char *MTSGetScaleName() { return scaleName; }
 }
