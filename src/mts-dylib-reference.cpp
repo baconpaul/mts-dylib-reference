@@ -13,7 +13,8 @@
 #include <array>
 #include <string>
 #include <cassert>
-#include <thread>
+#include <mutex>
+
 
 #if !defined(MTSREF_EXPORT)
 #if defined _WIN32 || defined __CYGWIN__
