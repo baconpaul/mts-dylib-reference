@@ -14,5 +14,7 @@ add_library(MTS SHARED src/mts-dylib-reference.cpp)
 
 if (UNIX OR APPLE)
     target_compile_definitions(MTS PRIVATE IPC_SUPPORT=1)
+    target_link_libraries(MTS PRIVATE dl)
 endif()
 
+add_subdirectory(test)
