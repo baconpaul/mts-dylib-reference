@@ -80,12 +80,18 @@ int clientMasterTest()
     MTS_DeregisterClient(cl2);
 
     // Channel aware APIs
+    MTS_SetMultiChannelNoteTuning(880.0, 69, 4);
+    MTS_FilterNote(true, 60, -1);
+
     auto cl3 = MTS_RegisterClient();
-    freq = MTS_NoteToFrequency(cl3, 69, 0);
-    LOGDAT << "Client 3: Note 69 has frequency " << freq << std::endl;
-    if (freq != 432)
+    for (int ch=0; ch<16; ++ch)
     {
-        return 2;
+        freq = MTS_NoteToFrequency(cl3, 69, ch);
+        LOGDAT << "Client 3: Note 69 Ch " << ch << " has frequency " << freq << std::endl;
+        if (freq != (ch == 4 ? 880 : 432))
+        {
+            return 2;
+        }
     }
     MTS_DeregisterClient(cl3);
 
