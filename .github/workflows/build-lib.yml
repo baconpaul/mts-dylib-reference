@@ -23,14 +23,17 @@ jobs:
             dylib: Release/MTS.dll
             dylibvar: \\build\\Release\\MTS.dll
             testexe: test/Release/test-dylib.exe
+            runipc: false
           - os: macos-latest
             dylib: libMTS.dylib
             dylibvar: /build/libMTS.dylib
             testexe: test/test-dylib
+            runipc: true
           - os: ubuntu-latest
             dylib: libMTS.so
             dylibvar: /build/libMTS.so
             testexe: test/test-dylib
+            runipc: true
 
     steps:
       - name: Checkout code
@@ -48,7 +51,7 @@ jobs:
           cmake --build ./build --config Release
           echo "----"
           echo "Specific dylib"
-          cmake --build ./build --config Release --target test-dylib
+          cmake --build ./build --config Release --target all-tests
 
       - name: Show Build Directory and dylib
         run: |
@@ -71,4 +74,13 @@ jobs:
           ./build/${{ matrix.testexe }} --masterTest
           ./build/${{ matrix.testexe }} --masterTwice
           # MTS_REFERENCE_DEACTIVATE_IPC=1 ./build/${{ matrix.testexe }}
+          
+      - name: Run IPC Test
+        if: ${{ matrix.runipc }}
+        run: |
+          export MTS_LIB_LOCATION=${GITHUB_WORKSPACE}${{ matrix.dylibvar }}
+          ./build/test/mst24EDO &
+          sleep 1
+          ./build/test/clnt24EDO
+          
 
