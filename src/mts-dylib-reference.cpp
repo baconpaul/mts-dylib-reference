@@ -52,13 +52,15 @@ static void setDefaultTuning(double *t)
         t[i] = 440. * pow(2., (i - 69.) / 12.);
 }
 
-static constexpr size_t memSize{sizeof(bool) + sizeof(bool) + sizeof(int32_t) +
+static constexpr size_t maxScaleNameSize{512};
+static constexpr size_t memSize{sizeof(bool) + sizeof(bool) + sizeof(int32_t) + maxScaleNameSize +
                                 128 * 16 * sizeof(double) + 128 * sizeof(uint16_t)};
 bool *hasMaster{nullptr};
 bool *tuningInitialized{nullptr};
 int32_t *numClients{nullptr};
 double *tuning[16]{};
 uint16_t *noteFilter{nullptr}; // channel bitset per key
+char *scaleName;
 
 uint8_t memory[memSize];
 
@@ -138,6 +140,10 @@ bool connectToMemory()
     }
 
     noteFilter = (uint16_t *)memSeg;
+    memSeg += 128 * sizeof(uint16_t);
+
+    scaleName = (char *)memSeg;
+    memSeg += maxScaleNameSize;
 
     if (initValues)
     {
@@ -234,28 +240,39 @@ struct DisconnectOnExitGuard
 extern "C"
 {
 
+#define MASTER_SIDE_VALID(x)                                                                       \
+    if (!hasMaster)                                                                                \
+    {                                                                                              \
+        LOGDAT << "Warning: Invalid call sequence" << std::endl;                                   \
+        return x;                                                                                  \
+    }
+
     // Master-side API
     MTSREF_EXPORT void MTS_RegisterMaster(void *)
     {
         LOGFN;
         connectToMemory();
+        MASTER_SIDE_VALID();
         *hasMaster = true;
         *numClients = 0;
     }
     MTSREF_EXPORT void MTS_DeregisterMaster()
     {
         LOGFN;
-        *hasMaster = false;
-        *numClients = 0;
 
+        // special case - don't use the valid maco
+        if (!hasMaster)
+        {
+            *hasMaster = false;
+            *numClients = 0;
+        }
         checkForMemoryRelease();
     }
     MTSREF_EXPORT bool MTS_HasMaster()
     {
-        if (hasMaster)
-            return *hasMaster;
-        else
-            return false;
+        MASTER_SIDE_VALID(false);
+
+        return *hasMaster;
     }
     MTSREF_EXPORT bool MTS_HasIPC()
     {
@@ -274,6 +291,8 @@ extern "C"
 
         connectToMemory();
 
+        MASTER_SIDE_VALID();
+
         *hasMaster = false;
         *numClients = 0;
         for (int i = 0; i < 16; ++i)
@@ -284,11 +303,16 @@ extern "C"
         *tuningInitialized = true;
     }
 
-    MTSREF_EXPORT int MTS_GetNumClients() { return *numClients; }
+    MTSREF_EXPORT int MTS_GetNumClients()
+    {
+        MASTER_SIDE_VALID(-1);
+        return *numClients;
+    }
 
     MTSREF_EXPORT void MTS_SetNoteTunings(const double *d)
     {
         LOGFN;
+        MASTER_SIDE_VALID();
         for (int ch = 0; ch < 16; ++ch)
             for (int i = 0; i < 128; ++i)
                 tuning[ch][i] = d[i];
@@ -296,20 +320,22 @@ extern "C"
 
     MTSREF_EXPORT void MTS_SetNoteTuning(double f, char idx)
     {
+        MASTER_SIDE_VALID();
         for (int ch = 0; ch < 16; ++ch)
             tuning[ch][idx] = f;
     }
 
-    char scaleName[256]{0};
     MTSREF_EXPORT void MTS_SetScaleName(const char *s)
     {
+        MASTER_SIDE_VALID();
         LOGDAT << s << std::endl;
-        strncpy(scaleName, s, 255);
+        strncpy(scaleName, s, maxScaleNameSize - 1);
     }
 
     // Don't implement note filtering or channel specific tuning yet
     MTSREF_EXPORT void MTS_FilterNote(bool doF, char note, char chan)
     {
+        MASTER_SIDE_VALID();
         uint16_t mask = 0xFFFF;
 
         if (chan >= 0 && chan <= 15)
@@ -328,6 +354,7 @@ extern "C"
     }
     MTSREF_EXPORT void MTS_ClearNoteFilter()
     {
+        MASTER_SIDE_VALID();
         for (int i = 0; i < 128; ++i)
         {
             noteFilter[i] = 0;
@@ -335,6 +362,7 @@ extern "C"
     }
     MTSREF_EXPORT void MTS_FilterNoteMultiChannel(bool doF, char note, char chan)
     {
+        MASTER_SIDE_VALID();
         if (chan >= 0 && chan < 15)
         {
             MTS_FilterNote(doF, note, chan);
@@ -342,6 +370,7 @@ extern "C"
     }
     MTSREF_EXPORT void MTS_ClearNoteFilterMultiChannel(char chan)
     {
+        MASTER_SIDE_VALID();
         uint16_t off = 1 << chan;
         for (int i = 0; i < 128; ++i)
         {
@@ -352,11 +381,13 @@ extern "C"
     MTSREF_EXPORT void MTS_SetMultiChannel(bool, char) {}
     MTSREF_EXPORT void MTS_SetMultiChannelNoteTunings(const double *d, char ch)
     {
+        MASTER_SIDE_VALID();
         for (int i = 0; i < 128; ++i)
             tuning[ch][i] = d[i];
     }
     MTSREF_EXPORT void MTS_SetMultiChannelNoteTuning(double freq, char note, char ch)
     {
+        MASTER_SIDE_VALID();
         LOGDAT << "f=" << freq << " at " << (int)note << " " << (int)ch << std::endl;
         tuning[ch][note] = freq;
     }
@@ -408,5 +439,8 @@ extern "C"
         return &tuning[ch][0];
     }
     MTSREF_EXPORT bool MTS_UseMultiChannelTuning(char) { return true; }
-    MTSREF_EXPORT const char *MTSGetScaleName() { return scaleName; }
+    MTSREF_EXPORT const char *MTS_GetScaleName() {
+        LOGFN;
+        return scaleName;
+    }
 }
