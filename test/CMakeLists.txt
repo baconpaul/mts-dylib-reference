@@ -8,6 +8,12 @@ add_executable(${PROJECT_NAME} test-lib.cpp
 target_include_directories(${PROJECT_NAME} PRIVATE modified-oddsound/Client modified-oddsound/Master)
 add_dependencies(${PROJECT_NAME} MTS)
 
+add_executable(${PROJECT_NAME}-masteronly test-lib-masteronly.cpp
+        modified-oddsound/Master/libMTSMaster.cpp
+)
+target_include_directories(${PROJECT_NAME}-masteronly PRIVATE  modified-oddsound/Master)
+add_dependencies(${PROJECT_NAME}-masteronly MTS)
+
 add_executable(mst24EDO mst24EDO.cpp modified-oddsound/Master/libMTSMaster.cpp)
 target_include_directories(mst24EDO PRIVATE modified-oddsound/Master)
 add_dependencies(mst24EDO MTS)
@@ -17,10 +23,11 @@ target_include_directories(clnt24EDO PRIVATE modified-oddsound/Client)
 add_dependencies(clnt24EDO MTS)
 
 add_custom_target(all-tests)
-add_dependencies(all-tests ${PROJECT_NAME} clnt24EDO mst24EDO)
+add_dependencies(all-tests ${PROJECT_NAME} ${PROJECT_NAME}-masteronly clnt24EDO mst24EDO)
 
 if (UNIX OR APPLE)
     target_link_libraries(${PROJECT_NAME} PRIVATE dl)
+    target_link_libraries(${PROJECT_NAME}-masteronly PRIVATE dl)
     target_link_libraries(mst24EDO PRIVATE dl)
     target_link_libraries(clnt24EDO PRIVATE dl)
 endif()

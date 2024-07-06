@@ -18,14 +18,6 @@ int clientTest()
     return 0;
 }
 
-int masterTest()
-{
-    MTS_RegisterMaster();
-    MTS_DeregisterMaster();
-
-    return 0;
-}
-
 int clientMasterTest()
 {
     MTS_RegisterMaster();
@@ -117,17 +109,6 @@ int invalidCallSequence()
     return 0;
 }
 
-int masterTwice()
-{
-    MTS_RegisterMaster();
-    MTS_DeregisterMaster();
-    MTS_Reinitialize();
-
-    MTS_RegisterMaster();
-    MTS_DeregisterMaster();
-
-    return 0;
-}
 
 int main(int argc, char **argv)
 {
@@ -151,10 +132,9 @@ int main(int argc, char **argv)
     }
 
     RUN(clientTest);
-    RUN(masterTest);
-    RUN(masterTwice);
-
     RUN(invalidCallSequence);
+
+    std::cout << "********* UNABLE to LOCATE TEST " << argv[1] << std::endl;
 
     exit(2);
 }
