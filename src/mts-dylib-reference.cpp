@@ -261,7 +261,7 @@ extern "C"
         LOGFN;
 
         // special case - don't use the valid maco
-        if (!hasMaster)
+        if (hasMaster)
         {
             *hasMaster = false;
             *numClients = 0;

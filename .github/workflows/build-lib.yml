@@ -23,16 +23,19 @@ jobs:
             dylib: Release/MTS.dll
             dylibvar: \\build\\Release\\MTS.dll
             testexe: test/Release/test-dylib.exe
+            testexe_master: test/Release/test-dylib-masteronly.exe
             runipc: false
           - os: macos-latest
             dylib: libMTS.dylib
             dylibvar: /build/libMTS.dylib
             testexe: test/test-dylib
+            testexe_master: test/test-dylib-masteronly
             runipc: true
           - os: ubuntu-latest
             dylib: libMTS.so
             dylibvar: /build/libMTS.so
             testexe: test/test-dylib
+            testexe_master: test/test-dylib-masteronly
             runipc: true
 
     steps:
@@ -71,9 +74,12 @@ jobs:
           
           ./build/${{ matrix.testexe }} --null
           ./build/${{ matrix.testexe }} --clientTest
-          ./build/${{ matrix.testexe }} --masterTest
-          ./build/${{ matrix.testexe }} --masterTwice
-          ./build/${{ matrix.testexe }} --invalidCallSequence
+          ./build/${{ matrix.testexe }} --invalidSequence
+          
+          ./build/${{ matrix.testexe_master }} --masterTest
+          ./build/${{ matrix.testexe_master }} --masterTwice
+          ./build/${{ matrix.testexe_master }} --invalidSequence
+          
           # MTS_REFERENCE_DEACTIVATE_IPC=1 ./build/${{ matrix.testexe }}
           
       - name: Run IPC Test
