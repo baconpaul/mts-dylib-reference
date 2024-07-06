@@ -4,6 +4,7 @@
 
 #include "libMTSMaster.h"
 #include <iostream>
+#include <string.h>
 
 
 
