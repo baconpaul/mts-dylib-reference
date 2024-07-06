@@ -74,7 +74,7 @@ jobs:
           
           ./build/${{ matrix.testexe }} --null
           ./build/${{ matrix.testexe }} --clientTest
-          ./build/${{ matrix.testexe }} --invalidSequence
+          ./build/${{ matrix.testexe }} --invalidCallSequence
 
       - name: Run Master Only Tests
         run: |
@@ -86,7 +86,7 @@ jobs:
           ./build/${{ matrix.testexe_master }} --masterTest
           ./build/${{ matrix.testexe_master }} --masterTestCan
           ./build/${{ matrix.testexe_master }} --masterTwice
-          ./build/${{ matrix.testexe_master }} --invalidSequence
+          ./build/${{ matrix.testexe_master }} --invalidCallSequence
 
       - name: Run IPC Test
         if: ${{ matrix.runipc }}
