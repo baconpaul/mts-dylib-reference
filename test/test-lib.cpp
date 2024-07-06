@@ -132,8 +132,9 @@ int main(int argc, char **argv)
     }
 
     RUN(clientTest);
-
     RUN(invalidCallSequence);
+
+    std::cout << "********* UNABLE to LOCATE TEST " << argv[1] << std::endl;
 
     exit(2);
 }

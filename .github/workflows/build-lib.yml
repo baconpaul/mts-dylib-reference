@@ -75,13 +75,19 @@ jobs:
           ./build/${{ matrix.testexe }} --null
           ./build/${{ matrix.testexe }} --clientTest
           ./build/${{ matrix.testexe }} --invalidSequence
+
+      - name: Run Master Only Tests
+        run: |
+          set -e
+          
+          export MTS_LIB_LOCATION=${GITHUB_WORKSPACE}${{ matrix.dylibvar }}
+          echo $MTS_LIB_LOCATION
           
           ./build/${{ matrix.testexe_master }} --masterTest
+          ./build/${{ matrix.testexe_master }} --masterTestCan
           ./build/${{ matrix.testexe_master }} --masterTwice
           ./build/${{ matrix.testexe_master }} --invalidSequence
-          
-          # MTS_REFERENCE_DEACTIVATE_IPC=1 ./build/${{ matrix.testexe }}
-          
+
       - name: Run IPC Test
         if: ${{ matrix.runipc }}
         run: |

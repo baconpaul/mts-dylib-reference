@@ -78,5 +78,7 @@ int main(int argc, char **argv)
     RUN(masterTwice);
     RUN(invalidCallSequence);
 
-    exit(2);
+    std::cout << "********* UNABLE to LOCATE TEST " << argv[1] << std::endl;
+
+    exit(3);
 }
