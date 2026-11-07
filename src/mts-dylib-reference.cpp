@@ -62,6 +62,10 @@ double *tuning[16]{};
 uint16_t *noteFilter{nullptr}; // channel bitset per key
 char *scaleName;
 
+// int cast since char signedness varies by platform
+static bool validChannel(char c) { return (int)c >= 0 && (int)c < 16; }
+static bool validNote(char n) { return (int)n >= 0 && (int)n < 128; }
+
 uint8_t memory[memSize];
 
 bool skipIPC() { return getenv("MTS_REFERENCE_DEACTIVATE_IPC"); }
@@ -296,7 +300,7 @@ extern "C"
         *hasMaster = false;
         *numClients = 0;
         for (int i = 0; i < 16; ++i)
-            setDefaultTuning(tuning[0]);
+            setDefaultTuning(tuning[i]);
         for (int i = 0; i < 128; ++i)
             noteFilter[i] = 0;
 
@@ -321,6 +325,8 @@ extern "C"
     MTSREF_EXPORT void MTS_SetNoteTuning(double f, char idx)
     {
         MASTER_SIDE_VALID();
+        if (!validNote(idx))
+            return;
         for (int ch = 0; ch < 16; ++ch)
             tuning[ch][idx] = f;
     }
@@ -336,9 +342,12 @@ extern "C"
     MTSREF_EXPORT void MTS_FilterNote(bool doF, char note, char chan)
     {
         MASTER_SIDE_VALID();
+        if (!validNote(note))
+            return;
+
         uint16_t mask = 0xFFFF;
 
-        if (chan >= 0 && chan <= 15)
+        if (validChannel(chan))
         {
             mask = 1 << chan;
         }
@@ -363,7 +372,7 @@ extern "C"
     MTSREF_EXPORT void MTS_FilterNoteMultiChannel(bool doF, char note, char chan)
     {
         MASTER_SIDE_VALID();
-        if (chan >= 0 && chan < 15)
+        if (validChannel(chan))
         {
             MTS_FilterNote(doF, note, chan);
         }
@@ -371,6 +380,8 @@ extern "C"
     MTSREF_EXPORT void MTS_ClearNoteFilterMultiChannel(char chan)
     {
         MASTER_SIDE_VALID();
+        if (!validChannel(chan))
+            return;
         uint16_t off = 1 << chan;
         for (int i = 0; i < 128; ++i)
         {
@@ -382,6 +393,8 @@ extern "C"
     MTSREF_EXPORT void MTS_SetMultiChannelNoteTunings(const double *d, char ch)
     {
         MASTER_SIDE_VALID();
+        if (!validChannel(ch))
+            return;
         for (int i = 0; i < 128; ++i)
             tuning[ch][i] = d[i];
     }
@@ -389,6 +402,8 @@ extern "C"
     {
         MASTER_SIDE_VALID();
         LOGDAT << "f=" << freq << " at " << (int)note << " " << (int)ch << std::endl;
+        if (!validChannel(ch) || !validNote(note))
+            return;
         tuning[ch][note] = freq;
     }
 
@@ -408,8 +423,11 @@ extern "C"
 
     MTSREF_EXPORT bool MTS_ShouldFilterNote(char note, char chan)
     {
+        if (!validNote(note))
+            return false;
+
         uint16_t mask = 0xFFFF;
-        if (chan >= 0 && chan <= 15)
+        if (validChannel(chan))
             mask = 1 << chan;
 
         return noteFilter[note] & mask;
@@ -417,8 +435,11 @@ extern "C"
 
     MTSREF_EXPORT bool MTS_ShouldFilterNoteMultiChannel(char note, char chan)
     {
+        if (!validNote(note))
+            return false;
+
         uint16_t mask = 0xFFFF;
-        if (chan >= 0 && chan <= 15)
+        if (validChannel(chan))
             mask = 1 << chan;
 
         return noteFilter[note] & mask;
@@ -436,10 +457,13 @@ extern "C"
         static DisconnectOnExitGuard rt;
         connectToMemory();
 
+        if (!validChannel(ch))
+            return &tuning[0][0];
         return &tuning[ch][0];
     }
     MTSREF_EXPORT bool MTS_UseMultiChannelTuning(char) { return true; }
-    MTSREF_EXPORT const char *MTS_GetScaleName() {
+    MTSREF_EXPORT const char *MTS_GetScaleName()
+    {
         LOGFN;
         return scaleName;
     }
