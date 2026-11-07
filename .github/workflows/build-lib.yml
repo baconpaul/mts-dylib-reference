@@ -44,10 +44,6 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Select Xcode Version
-        if: runner.os == 'macOS'
-        run: sudo xcode-select -switch /Applications/Xcode_15.1.app
-
       - name: Build 
         run: |
           cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Release
