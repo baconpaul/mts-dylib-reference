@@ -8,9 +8,28 @@
 #include "libMTSMaster.h"
 #include "libMTSClient.h"
 
+#if TEST_IPC_SUPPORT
+#include <stdlib.h>
+#include <sys/shm.h>
+#endif
+
 #define LOGDAT                                                                                     \
     std::cout << "test/test-lib.cpp"                                                               \
               << ":" << __LINE__ << " [" << __func__ << "] "
+
+#if TEST_IPC_SUPPORT
+// must match shmProjectId in src/mts-dylib-reference.cpp
+static constexpr int shmProjectId{64};
+
+// id of the library's live segment, or -1 if there is none
+static int liveSegment()
+{
+    auto loc = getenv("MTS_LIB_LOCATION");
+    if (!loc)
+        return -1;
+    return shmget(ftok(loc, shmProjectId), 0, 0);
+}
+#endif
 
 int clientTest()
 {
@@ -148,33 +167,99 @@ int apiV103Test()
         return 5;
     }
 
-    MTS_DeregisterClient(cl);
-
-    // with ipc the segment is released on deregister, invalidating the client's cached tables
-    if (MTS_HasIPC())
-    {
-        LOGDAT << "Skipping deregister reset check under IPC" << std::endl;
-        MTS_DeregisterMaster();
-        return 0;
-    }
-
     MTS_SetNoteTuning(432.0, 69);
     MTS_SetScaleName("stale scale");
     MTS_SetMapSize(12);
-    MTS_DeregisterMaster();
-
-    MTS_RegisterMaster();
-    auto cl2 = MTS_RegisterClient();
-    auto freq = MTS_NoteToFrequency(cl2, 69, -1);
-    LOGDAT << "After re-register: freq " << freq << " size " << (int)MTS_GetMapSize(cl2)
-           << " name '" << MTS_GetScaleName(cl2) << "'" << std::endl;
-    if (freq != 440.0 || MTS_GetMapSize(cl2) != -1 || strcmp(MTS_GetScaleName(cl2), "12-TET") != 0)
+    if (MTS_NoteToFrequency(cl, 69, -1) != 432.0)
     {
+        LOGDAT << "Tuning not applied before deregister" << std::endl;
         return 6;
     }
-    MTS_DeregisterClient(cl2);
+
+    // client stays registered so the segment survives the master leaving
+    MTS_DeregisterMaster();
+    MTS_RegisterMaster();
+
+    // a fresh segment would also read as defaults, so prove this is the same one
+    if (MTS_GetNumClients() != 1)
+    {
+        LOGDAT << "Segment did not survive master deregister" << std::endl;
+        return 8;
+    }
+
+    auto freq = MTS_NoteToFrequency(cl, 69, -1);
+    LOGDAT << "After re-register: freq " << freq << " size " << (int)MTS_GetMapSize(cl) << " name '"
+           << MTS_GetScaleName(cl) << "'" << std::endl;
+    if (freq != 440.0 || MTS_GetMapSize(cl) != -1 || strcmp(MTS_GetScaleName(cl), "12-TET") != 0)
+    {
+        return 7;
+    }
+    MTS_DeregisterClient(cl);
     MTS_DeregisterMaster();
 
+    return 0;
+}
+
+// the client wrapper caches table pointers at load, before any client registers
+int masterRestartTest()
+{
+    MTS_RegisterMaster();
+    MTS_SetNoteTuning(432.0, 69);
+#if TEST_IPC_SUPPORT
+    bool checkSegment = MTS_HasIPC() && getenv("MTS_LIB_LOCATION");
+    int before = liveSegment();
+#endif
+
+    MTS_DeregisterMaster();
+
+#if TEST_IPC_SUPPORT
+    // a recreated segment can land at the old address and hide stale pointers
+    if (checkSegment && liveSegment() != before)
+    {
+        LOGDAT << "Segment " << before << " replaced by " << liveSegment() << std::endl;
+        return 1;
+    }
+#endif
+
+    MTS_RegisterMaster();
+    MTS_SetNoteTuning(450.0, 69);
+
+    auto cl = MTS_RegisterClient();
+    auto freq = MTS_NoteToFrequency(cl, 69, -1);
+    LOGDAT << "Client after master restart sees " << freq << std::endl;
+    if (freq != 450.0)
+        return 2;
+
+    MTS_DeregisterClient(cl);
+    MTS_DeregisterMaster();
+    return 0;
+}
+
+int clientCountTest()
+{
+    auto cl = MTS_RegisterClient();
+    MTS_RegisterMaster();
+    LOGDAT << "Clients after master registers: " << MTS_GetNumClients() << std::endl;
+    if (MTS_GetNumClients() != 1)
+        return 1;
+
+    MTS_DeregisterMaster();
+    MTS_RegisterMaster();
+    LOGDAT << "Clients after master re-registers: " << MTS_GetNumClients() << std::endl;
+    if (MTS_GetNumClients() != 1)
+        return 2;
+
+    auto cl2 = MTS_RegisterClient();
+    if (MTS_GetNumClients() != 2)
+        return 3;
+
+    MTS_DeregisterClient(cl2);
+    MTS_DeregisterClient(cl);
+    LOGDAT << "Clients after both deregister: " << MTS_GetNumClients() << std::endl;
+    if (MTS_GetNumClients() != 0)
+        return 4;
+
+    MTS_DeregisterMaster();
     return 0;
 }
 
@@ -207,6 +292,8 @@ int main(int argc, char **argv)
 
     RUN(clientTest);
     RUN(apiV103Test);
+    RUN(clientCountTest);
+    RUN(masterRestartTest);
     RUN(invalidCallSequence);
 
     std::cout << "********* UNABLE to LOCATE TEST " << argv[1] << std::endl;

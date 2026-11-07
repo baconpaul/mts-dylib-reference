@@ -14,6 +14,8 @@
 #include <string>
 #include <cassert>
 #include <mutex>
+#include <atomic>
+#include <type_traits>
 
 #if !defined(MTSREF_EXPORT)
 #if defined _WIN32 || defined __CYGWIN__
@@ -56,15 +58,30 @@ static void setDefaultTuning(double *t)
 static constexpr int libMTSVersion{0x00010003};
 
 static constexpr size_t maxScaleNameSize{512};
-static constexpr size_t memSize{sizeof(bool) + sizeof(bool) + sizeof(int32_t) + maxScaleNameSize +
-                                128 * 16 * sizeof(double) + 128 * sizeof(uint16_t) +
-                                sizeof(double) + 3 * sizeof(int8_t)};
+
+// a struct so the compiler pads each member to its alignof boundary
+struct SharedMemory
+{
+    bool hasMaster;
+    bool tuningInitialized;
+    int32_t numClients;
+    double tuning[16][128];
+    uint16_t noteFilter[128]; // channel bitset per key
+    char scaleName[maxScaleNameSize];
+    double periodRatio;
+    int8_t mapSize;
+    int8_t mapStartKey;
+    int8_t refKey;
+};
+static_assert(std::is_standard_layout<SharedMemory>::value, "shared across processes");
+static constexpr size_t memSize{sizeof(SharedMemory)};
+
 bool *hasMaster{nullptr};
 bool *tuningInitialized{nullptr};
 int32_t *numClients{nullptr};
 double *tuning[16]{};
-uint16_t *noteFilter{nullptr}; // channel bitset per key
-char *scaleName;
+uint16_t *noteFilter{nullptr};
+char *scaleName{nullptr};
 double *periodRatio{nullptr};
 int8_t *mapSize{nullptr};
 int8_t *mapStartKey{nullptr};
@@ -88,9 +105,30 @@ static void resetTuningData()
 static bool validChannel(char c) { return (int)c >= 0 && (int)c < 16; }
 static bool validNote(char n) { return (int)n >= 0 && (int)n < 128; }
 
-uint8_t memory[memSize];
+SharedMemory localMemory{};
+
+// bump when SharedMemory changes so old builds at the same path use a different segment
+static constexpr int shmProjectId{64};
+
+// set once callers hold pointers into the segment, so it must stay attached until exit
+std::atomic<bool> segmentPointersShared{false};
 
 bool skipIPC() { return getenv("MTS_REFERENCE_DEACTIVATE_IPC"); }
+
+#if IPC_SUPPORT
+// deleting a segment another process has attached would split master and clients
+static bool lastAttachment()
+{
+    struct shmid_ds ds;
+    if (shmctl(shmid, IPC_STAT, &ds) < 0)
+    {
+        LOGERR;
+        return false;
+    }
+    LOGDAT << "Segment has " << ds.shm_nattch << " attachments" << std::endl;
+    return ds.shm_nattch <= 1;
+}
+#endif
 
 std::mutex s_connectMutex{};
 
@@ -100,13 +138,13 @@ bool connectToMemory()
 
     bool initValues{false};
 
-    uint8_t *memSeg{nullptr};
+    SharedMemory *shm{nullptr};
 #if IPC_SUPPORT
 
     if (skipIPC())
     {
         LOGDAT << "IPC-enabled platform chooses to skip IPC support" << std::endl;
-        memSeg = (uint8_t *)(&(memory[0]));
+        shm = &localMemory;
     }
     else
     {
@@ -121,11 +159,11 @@ bool connectToMemory()
         auto res = dladdr((void *)connectToMemory, &dl_info);
         LOGDAT << "DLL Path is " << dl_info.dli_fname << std::endl;
 
-        key_t key = ftok(dl_info.dli_fname, 63);
+        key_t key = ftok(dl_info.dli_fname, shmProjectId);
         if (key < 0)
         {
             LOGERR;
-            LOGDAT << "Unable to create mtsesp / 65 key" << std::endl;
+            LOGDAT << "Unable to create shmem key" << std::endl;
         }
 
         // Step one: See if they memory exists without creating it
@@ -144,44 +182,31 @@ bool connectToMemory()
             }
         }
 
-        memSeg = (uint8_t *)shmat(shmid, (void *)0, 0);
+        void *seg = shmat(shmid, (void *)0, 0);
+        if (seg == (void *)-1)
+        {
+            LOGERR;
+            LOGDAT << "Unable to attach shared memory segment" << std::endl;
+            return false;
+        }
+        // shmat returns page aligned memory so the struct alignment holds
+        shm = (SharedMemory *)seg;
     }
 #else
-    memSeg = (uint8_t *)(&(memory[0]));
+    shm = &localMemory;
 #endif
 
-    hasMaster = (bool *)memSeg;
-    memSeg += sizeof(bool);
-
-    tuningInitialized = (bool *)memSeg;
-    memSeg += sizeof(bool);
-
-    numClients = (int32_t *)memSeg;
-    memSeg += sizeof(int32_t);
-
+    hasMaster = &shm->hasMaster;
+    tuningInitialized = &shm->tuningInitialized;
+    numClients = &shm->numClients;
     for (int i = 0; i < 16; ++i)
-    {
-        tuning[i] = (double *)memSeg;
-        memSeg += 128 * sizeof(double);
-    }
-
-    noteFilter = (uint16_t *)memSeg;
-    memSeg += 128 * sizeof(uint16_t);
-
-    scaleName = (char *)memSeg;
-    memSeg += maxScaleNameSize;
-
-    periodRatio = (double *)memSeg;
-    memSeg += sizeof(double);
-
-    mapSize = (int8_t *)memSeg;
-    memSeg += sizeof(int8_t);
-
-    mapStartKey = (int8_t *)memSeg;
-    memSeg += sizeof(int8_t);
-
-    refKey = (int8_t *)memSeg;
-    memSeg += sizeof(int8_t);
+        tuning[i] = shm->tuning[i];
+    noteFilter = shm->noteFilter;
+    scaleName = shm->scaleName;
+    periodRatio = &shm->periodRatio;
+    mapSize = &shm->mapSize;
+    mapStartKey = &shm->mapStartKey;
+    refKey = &shm->refKey;
 
     if (initValues)
     {
@@ -215,20 +240,24 @@ void checkForMemoryRelease()
         return;
     }
 
-    bool freeSegment{false};
-    if (hasMaster && !*hasMaster && numClients && !*numClients)
+    if (*hasMaster || !numClients || *numClients)
+        return;
+
+    if (segmentPointersShared)
     {
-        freeSegment = true;
+        LOGDAT << "No clients and no master, but tables are in use so staying attached"
+               << std::endl;
+        return;
     }
 
-    if (freeSegment)
+    bool removeSegment = lastAttachment();
+
+    LOGDAT << "Detaching because no clients and no master" << std::endl;
+    shmdt(hasMaster);
+    hasMaster = nullptr;
+
+    if (removeSegment)
     {
-        LOGDAT << "Releasing memory because no clients and no master" << std::endl;
-        if (hasMaster)
-        {
-            shmdt(hasMaster);
-            hasMaster = nullptr;
-        }
         LOGDAT << "Releasing unused memory segment at " << shmid << std::endl;
         shmctl(shmid, IPC_RMID, nullptr);
     }
@@ -254,7 +283,7 @@ struct DisconnectOnExitGuard
          */
 
         bool freeSegment{false};
-        if (hasMaster && !*hasMaster && numClients && !*numClients)
+        if (hasMaster && !*hasMaster && numClients && !*numClients && lastAttachment())
         {
             freeSegment = true;
         }
@@ -289,7 +318,6 @@ extern "C"
         connectToMemory();
         MASTER_SIDE_VALID();
         *hasMaster = true;
-        *numClients = 0;
     }
     MTSREF_EXPORT void MTS_DeregisterMaster()
     {
@@ -299,7 +327,6 @@ extern "C"
         if (hasMaster)
         {
             *hasMaster = false;
-            *numClients = 0;
             // so the next master doesn't inherit stale tuning
             resetTuningData();
         }
@@ -466,13 +493,18 @@ extern "C"
     // Client implementation
     MTSREF_EXPORT void MTS_RegisterClient()
     {
-        connectToMemory();
+        if (!connectToMemory())
+            return;
         (*numClients)++;
         LOGDAT << "Client count is " << (*numClients) << std::endl;
     }
     MTSREF_EXPORT void MTS_DeregisterClient()
     {
-        (*numClients)--;
+        if (!numClients)
+            return;
+        // reinitialize zeroes the count under clients that are still registered
+        if (*numClients > 0)
+            (*numClients)--;
         LOGDAT << "Client count is " << (*numClients) << std::endl;
         checkForMemoryRelease();
     }
@@ -505,6 +537,7 @@ extern "C"
     {
         static DisconnectOnExitGuard rt;
         connectToMemory();
+        segmentPointersShared = true;
 
         return &tuning[0][0];
     }
@@ -512,6 +545,7 @@ extern "C"
     {
         static DisconnectOnExitGuard rt;
         connectToMemory();
+        segmentPointersShared = true;
 
         if (!validChannel(ch))
             return &tuning[0][0];
@@ -521,6 +555,8 @@ extern "C"
     MTSREF_EXPORT const char *MTS_GetScaleName()
     {
         LOGFN;
+        if (scaleName)
+            segmentPointersShared = true;
         return scaleName;
     }
 
