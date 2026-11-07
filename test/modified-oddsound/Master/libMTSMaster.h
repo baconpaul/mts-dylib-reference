@@ -85,6 +85,16 @@ extern "C" {
      to a multi-channel one.
      
      
+     After registering, you may wish to let the user know if they have an older version of the libMTS dynamic library
+     installed which may not support some features in this version of the API:
+     
+        bool should_update = MTS_Master_ShouldUpdateLibrary();
+     
+     The latest version of libMTS will always be backward compatible with masters built with
+     an older version of the API. Users can update libMTS using the installers at
+     https://github.com/ODDSound/MTS-ESP/tree/main/libMTS.
+     
+     
      IPC support:
      
      MTS_HasIPC() allows you to check if the process in which the plug-in is running is using IPC for sharing MTS-ESP
@@ -94,7 +104,25 @@ extern "C" {
      including tuning tables, scale name, note filters, client count and master connection status.
      
      IMPORTANT: ONLY if MTS_CanRegisterMaster() returns false and MTS_HasIPC() returns true is it advisable to offer an option to
-     the user to reinitialize MTS-ESP. Follow re-initialization with a call to MTS_RegisterMaster().
+     the user to reinitialize MTS-ESP. Follow reinitialization with a call to MTS_RegisterMaster(). The code for registering
+     as a master should follow this pattern:
+     
+         if (MTS_CanRegisterMaster())
+             MTS_RegisterMaster();
+         else
+         {
+             if (MTS_HasIPC())
+             {
+                 Warn user another master is already connected, but provide an option to reinitialize MTS-ESP in case there was a crash and no master is connected any more;
+                 if (user clicks to reinitialize MTS-ESP)
+                 {
+                     MTS_Reinitialize();
+                     MTS_RegisterMaster();
+                 }
+             }
+             else
+                 Warn user another master is already connected, do not provide an option to reinitialize MTS-ESP;
+         }
 
      */
 
@@ -115,6 +143,9 @@ extern "C" {
     // plug-in is running crashes.
     extern void MTS_Reinitialize();
     
+    // Check if the MTS-ESP dynamic library needs to be updated to use all features in this version of the API.
+    extern bool MTS_Master_ShouldUpdateLibrary();
+
     // Returns the number of connected clients.
     extern int MTS_GetNumClients();
 
@@ -125,10 +156,24 @@ extern "C" {
     // Set a scale name, so it can be displayed in clients or included in MTS sysex messages sent by a client.
     extern void MTS_SetScaleName(const char *name);
 
+    // Set the period ratio of the scale, e.g for a period of an octave supply 2.0.
+    extern void MTS_SetPeriodRatio(double periodRatio);
+
+    // Supply information about how a scale is mapped to the MIDI note range.
+    //  - Map size: the number of notes between each repetition of the scale pattern.
+    //  - Map start key: the note on which the map starts. This could technically be any key at which the scale pattern repeats but would typically be the one below but nearest to the ref key.
+    //  - Ref key: the note for which a frequency has been explicitly defined and from which the frequency of all other notes is established.
+    // Negative values are invalid. If you do not wish to supply this information, or it is not relevant for the current tuning, set -1 as the argument. 
+    // This will indicate to client plug-ins that they cannot use the queried values.
+    // Using these functions is optional and if you don't call them at all clients will receive values of -1 by default.
+    extern void MTS_SetMapSize(signed char size);
+    extern void MTS_SetMapStartKey(signed char key);
+    extern void MTS_SetRefKey(signed char key);
+
     // Instruct clients to filter midi notes e.g. because they are not mapped to any scale steps.
     // MIDI channel argument is optional, filtering will apply to all channels if not provided.
     // Range for midichannel argument is 0-15, or -1 for all channels.
-    extern void MTS_FilterNote(bool doFilter, char midinote, char midichannel);
+    extern void MTS_FilterNote(bool doFilter, char midinote, signed char midichannel);
     extern void MTS_ClearNoteFilter();
 
     //-------------------------------------------------------------------------------------------------------
@@ -137,15 +182,15 @@ extern "C" {
     // Range for midichannel arguments is 0-15.
 
     // Set whether a specific MIDI channel is included in the multi-channel tuning table.
-    extern void MTS_SetMultiChannel(bool set, char midichannel);
+    extern void MTS_SetMultiChannel(bool set, signed char midichannel);
     
     // Set frequencies for 128 MIDI notes on a specific MIDI channel.
-    extern void MTS_SetMultiChannelNoteTunings(const double *freqs, char midichannel);
-    extern void MTS_SetMultiChannelNoteTuning(double freq, char midinote, char midichannel);
+    extern void MTS_SetMultiChannelNoteTunings(const double *freqs, signed char midichannel);
+    extern void MTS_SetMultiChannelNoteTuning(double freq, char midinote, signed char midichannel);
     
     // Instruct clients to filter midi notes on a specific MIDI channel.
-    extern void MTS_FilterNoteMultiChannel(bool doFilter, char midinote, char midichannel);
-    extern void MTS_ClearNoteFilterMultiChannel(char midichannel);
+    extern void MTS_FilterNoteMultiChannel(bool doFilter, char midinote, signed char midichannel);
+    extern void MTS_ClearNoteFilterMultiChannel(signed char midichannel);
 
 #ifdef __cplusplus
 }
