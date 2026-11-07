@@ -76,6 +76,10 @@ jobs:
           ./build/${{ matrix.testexe }} --clientTest
           ./build/${{ matrix.testexe }} --apiV103Test
           MTS_REFERENCE_DEACTIVATE_IPC=1 ./build/${{ matrix.testexe }} --apiV103Test
+          ./build/${{ matrix.testexe }} --clientCountTest
+          MTS_REFERENCE_DEACTIVATE_IPC=1 ./build/${{ matrix.testexe }} --clientCountTest
+          ./build/${{ matrix.testexe }} --masterRestartTest
+          MTS_REFERENCE_DEACTIVATE_IPC=1 ./build/${{ matrix.testexe }} --masterRestartTest
           ./build/${{ matrix.testexe }} --invalidCallSequence
 
       - name: Run Master Only Tests
