@@ -52,15 +52,37 @@ static void setDefaultTuning(double *t)
         t[i] = 440. * pow(2., (i - 69.) / 12.);
 }
 
+// matches the MTS-ESP API version these exports implement
+static constexpr int libMTSVersion{0x00010003};
+
 static constexpr size_t maxScaleNameSize{512};
 static constexpr size_t memSize{sizeof(bool) + sizeof(bool) + sizeof(int32_t) + maxScaleNameSize +
-                                128 * 16 * sizeof(double) + 128 * sizeof(uint16_t)};
+                                128 * 16 * sizeof(double) + 128 * sizeof(uint16_t) +
+                                sizeof(double) + 3 * sizeof(int8_t)};
 bool *hasMaster{nullptr};
 bool *tuningInitialized{nullptr};
 int32_t *numClients{nullptr};
 double *tuning[16]{};
 uint16_t *noteFilter{nullptr}; // channel bitset per key
 char *scaleName;
+double *periodRatio{nullptr};
+int8_t *mapSize{nullptr};
+int8_t *mapStartKey{nullptr};
+int8_t *refKey{nullptr};
+
+static void resetTuningData()
+{
+    for (int i = 0; i < 16; ++i)
+        setDefaultTuning(tuning[i]);
+    for (int i = 0; i < 128; ++i)
+        noteFilter[i] = 0;
+    strncpy(scaleName, "12-TET", maxScaleNameSize - 1);
+    *periodRatio = 2.0;
+    // -1 tells clients the master has not supplied a mapping
+    *mapSize = -1;
+    *mapStartKey = -1;
+    *refKey = -1;
+}
 
 // int cast since char signedness varies by platform
 static bool validChannel(char c) { return (int)c >= 0 && (int)c < 16; }
@@ -149,6 +171,18 @@ bool connectToMemory()
     scaleName = (char *)memSeg;
     memSeg += maxScaleNameSize;
 
+    periodRatio = (double *)memSeg;
+    memSeg += sizeof(double);
+
+    mapSize = (int8_t *)memSeg;
+    memSeg += sizeof(int8_t);
+
+    mapStartKey = (int8_t *)memSeg;
+    memSeg += sizeof(int8_t);
+
+    refKey = (int8_t *)memSeg;
+    memSeg += sizeof(int8_t);
+
     if (initValues)
     {
         LOGDAT << "Initializing values post creation" << std::endl;
@@ -160,10 +194,7 @@ bool connectToMemory()
     if (!*tuningInitialized)
     {
         LOGDAT << "Initializing tuning table to 12-tet unfiltered" << std::endl;
-        for (int i = 0; i < 16; ++i)
-            setDefaultTuning(tuning[i]);
-        for (int i = 0; i < 128; ++i)
-            noteFilter[i] = 0;
+        resetTuningData();
         *tuningInitialized = true;
     }
 
@@ -269,6 +300,8 @@ extern "C"
         {
             *hasMaster = false;
             *numClients = 0;
+            // so the next master doesn't inherit stale tuning
+            resetTuningData();
         }
         checkForMemoryRelease();
     }
@@ -299,13 +332,12 @@ extern "C"
 
         *hasMaster = false;
         *numClients = 0;
-        for (int i = 0; i < 16; ++i)
-            setDefaultTuning(tuning[i]);
-        for (int i = 0; i < 128; ++i)
-            noteFilter[i] = 0;
+        resetTuningData();
 
         *tuningInitialized = true;
     }
+
+    MTSREF_EXPORT int MTS_GetVersionNumber() { return libMTSVersion; }
 
     MTSREF_EXPORT int MTS_GetNumClients()
     {
@@ -336,6 +368,30 @@ extern "C"
         MASTER_SIDE_VALID();
         LOGDAT << s << std::endl;
         strncpy(scaleName, s, maxScaleNameSize - 1);
+    }
+
+    MTSREF_EXPORT void MTS_SetPeriodRatio(double r)
+    {
+        MASTER_SIDE_VALID();
+        // nonsense ratios fall back to the octave clients assume when unset
+        *periodRatio = (std::isfinite(r) && r > 0) ? r : 2.0;
+    }
+
+    // any negative value means unsupplied, and clients expect exactly -1
+    MTSREF_EXPORT void MTS_SetMapSize(signed char v)
+    {
+        MASTER_SIDE_VALID();
+        *mapSize = v < 0 ? -1 : v;
+    }
+    MTSREF_EXPORT void MTS_SetMapStartKey(signed char v)
+    {
+        MASTER_SIDE_VALID();
+        *mapStartKey = v < 0 ? -1 : v;
+    }
+    MTSREF_EXPORT void MTS_SetRefKey(signed char v)
+    {
+        MASTER_SIDE_VALID();
+        *refKey = v < 0 ? -1 : v;
     }
 
     // Don't implement note filtering or channel specific tuning yet
@@ -467,4 +523,10 @@ extern "C"
         LOGFN;
         return scaleName;
     }
+
+    // defaults match what the client wrapper assumes when unconnected
+    MTSREF_EXPORT double MTS_GetPeriodRatio() { return periodRatio ? *periodRatio : 2.0; }
+    MTSREF_EXPORT signed char MTS_GetMapSize() { return mapSize ? *mapSize : -1; }
+    MTSREF_EXPORT signed char MTS_GetMapStartKey() { return mapStartKey ? *mapStartKey : -1; }
+    MTSREF_EXPORT signed char MTS_GetRefKey() { return refKey ? *refKey : -1; }
 }
